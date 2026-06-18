@@ -21,8 +21,7 @@ words into the files themselves. Do that now:
    - **synonyms** and alternate phrasings — e.g. car / automobile / vehicle;
    - **abbreviations and their expansions** — e.g. db / database, auth /
      authentication, k8s / kubernetes, PR / pull request;
-   - **domain or non-English terms** the team actually uses — e.g. cikkszám /
-     article number / SKU;
+   - **domain or non-English terms** the team actually uses;
    - a couple of common word-forms only if the root isn't obvious.
 
    Format it as a YAML list:
@@ -31,7 +30,7 @@ words into the files themselves. Do that now:
    ---
    name: Product pricing
    description: ...
-   keywords: [pricing, price, cost, margin, markup, supplier, vendor, SKU, cikkszám, article number]
+   keywords: [pricing, price, cost, margin, markup, supplier, vendor, SKU]
    ---
    ```
 

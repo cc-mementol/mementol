@@ -1,185 +1,90 @@
 # mementol
 
-*Memory medication for Claude Code — a daily dose so Claude doesn't forget.*
-
-A Claude Code plugin that **automatically injects your linked memory files into every prompt** — on any project, no per-project config. (Think Cavinton for your context window.)
+*Auto-loads your linked Claude Code memory into every prompt — so it's actually used, not just indexed.*
 
 ## The problem
 
-Claude Code encourages a lean "index" memory file (`MEMORY.md`, or a `## Memory`
-section in `CLAUDE.md`) that links out to deeper topic files:
+Claude Code loads your index file (`MEMORY.md`, or a `## Memory` section in `CLAUDE.md`) but doesn't reliably act on an instruction like *"read MEMORY.md and the relevant topic files."* It decides per turn whether to open them, and often skips it — so your deep-dive memory is ignored unless you explicitly say "read the memory files."
 
-```markdown
-## Memory — read these before working
-- [Product Lists](memory/product-lists.md) — sync system, fuzzy matching, pricing
-- [Deployment](memory/deployment.md) — build steps, server layout, rollback
-```
+## What it does
 
-Claude Code loads the **index file's own text** into context — but it does **not**
-reliably act on an instruction like *"read MEMORY.md and the relevant topic files."*
-That instruction is just text; the model decides per-turn whether to go open those
-files, and often skips it. So on a large codebase your carefully-written deep-dive
-memory is quietly ignored unless you explicitly say *"read the memory files."*
+On every prompt, a `UserPromptSubmit` hook finds your memory index, follows its links to topic `.md` files — markdown `[t](file.md)` **and** `@import`, recursively — and injects those files' contents into context. It only *reads* files; nothing on disk changes. In projects with no memory it does nothing, so it's safe to install globally.
 
-(Note: `@import` lines in `CLAUDE.md` — e.g. `@memory/product-lists.md` — *do* get
-pulled in automatically. A prose "please read these" does not. This plugin handles
-both, and works for `MEMORY.md` indexes that aren't `CLAUDE.md` at all.)
-
-## What this does
-
-On **every prompt**, a `UserPromptSubmit` hook:
-
-1. Discovers your memory **index** files (see *Where it looks* below).
-2. Follows every markdown link `[t](file.md)` and `@import` reference to a `.md` file —
-   **recursively** (bounded), so a `CLAUDE.md → MEMORY.md → topic.md` chain is fully resolved.
-3. Injects the contents of every linked file **that actually exists** into the prompt context.
-
-So your deep-dive memory is **always loaded**, automatically, without you asking.
-In projects with no memory it outputs nothing — safe to install globally.
-
-## Requirements
-
-- Claude Code (recent version — uses the plugin `args` hook form).
-- Node.js — already present, since Claude Code itself runs on it. No extra install.
+**Requirements:** Claude Code and Node.js (already present — Claude Code runs on it).
 
 ## Install
-
-In Claude Code, run these two commands:
 
 ```
 /plugin marketplace add cc-mementol/mementol
 /plugin install mementol@mementol
 ```
 
-Then open `/hooks` once (or restart Claude Code) to activate it — and that's it.
-It now runs on every prompt, automatically loading your linked memory on any
-project that has memory files. No `settings.json` editing required.
+Open `/hooks` once (or restart) to activate. Disable anytime via `/plugin`.
 
-To turn it off later, run `/plugin` and disable it (or `/plugin uninstall`).
-
-<details>
-<summary>Install from a local clone (for development)</summary>
-
-Clone or download the repo, then point the marketplace at the folder path
-instead of GitHub:
+<details><summary>Install from a local clone (development)</summary>
 
 ```
 /plugin marketplace add /absolute/path/to/mementol
 /plugin install mementol@mementol
 ```
-
 </details>
 
 ## Where it looks
 
-It scans these locations (all that exist are used, de-duplicated):
+No config needed — it scans these and uses whatever exists:
 
-**Memory directories** — if the dir has a `MEMORY.md` it's used as the index; a
-*trusted* dir with no index has all its `.md` files injected:
+- `$MEMORY_LOADER_DIR` (explicit override)
+- the auto-memory dir `~/.claude/projects/<slug>/memory/` (via `transcript_path`)
+- `<project>/.claude/memory/` and `<project>/memory/`
+- index files: `CLAUDE.md` (project, `.claude/`, user) and `MEMORY.md` (project, `.claude/`)
 
-| Location | Trusted (inject all `.md` if no index) |
-|---|---|
-| `$MEMORY_LOADER_DIR` | yes |
-| `~/.claude/projects/<slug>/memory/` (auto-memory, via `transcript_path`) | yes |
-| `<project>/.claude/memory/` | yes |
-| `<project>/memory/` | no — only used if it contains `MEMORY.md` |
+A directory with a `MEMORY.md` uses it as the index; a trusted memory dir without one injects all its `.md`. Links resolve against the index file's own folder, recursion is depth-bounded and de-duplicated, external `https://` links are ignored, and `CLAUDE.md` is read for links but never re-injected (Claude Code already loads it).
 
-**Index files** — parsed for links to follow:
+Preview what a project would load, before trusting the hook:
 
-- `<project>/CLAUDE.md`, `<project>/.claude/CLAUDE.md`, `~/.claude/CLAUDE.md`
-- `<project>/MEMORY.md`, `<project>/.claude/MEMORY.md`
-
-This covers Claude Code's default auto-memory location **and** project-committed
-memory, with no configuration. If your memory lives somewhere else, point
-`MEMORY_LOADER_DIR` at the folder that contains your `MEMORY.md`.
-
-## What gets injected
-
-- All `.md` files reachable from an index via markdown links or `@import`, that exist on disk.
-- Relative paths resolve against the **index file's own directory**.
-- External links (`https://…`) are ignored.
-- `CLAUDE.md` files are parsed for links but **never re-injected** — Claude Code
-  already loads them. `MEMORY.md` and topic files *are* injected. (If your `MEMORY.md`
-  is in Claude Code's auto-memory, it's already in context, so it may appear once
-  more here. Harmless.)
-- Recursion is bounded (default depth 4) and de-duplicated, so cycles are safe.
-
-## Dry run — see what it would load
-
-Run it from a project root with `--list`:
-
-```bash
+```
 node /path/to/mementol/scripts/inject-memory.mjs --list
 ```
 
-It prints the files it would inject and their sizes (or "no memory files found").
-Great for verifying a project before trusting the hook. (Without a piped hook
-payload it uses the current working directory.)
+## Configuration — from the UI
 
-## Configuration
+When you enable the plugin, Claude Code prompts you for two options (each with a default you can accept), editable later via `/plugin` → **mementol**:
 
-**Set it from the UI — no file editing.** When you enable the plugin, Claude Code prompts you for two options — **Injection mode** (`always`/`session`/`relevant`) and **Max injected bytes** — each with a sensible default you can just accept. Change them anytime via `/plugin` → **mementol** → its configuration.
+- **Injection mode** — `always` or `relevant` (see below)
+- **Max injected bytes** — default `200000` (~50k tokens); anything past the cap is skipped with a note
 
-Everything below is optional — for people who prefer config files or want the other knobs:
-
-| Env var | Default | Purpose |
-|---|---|---|
-| `MEMORY_LOADER_MODE` | `always` | When/what to inject — `always`, `session`, or `relevant`. See **Modes** below. |
-| `MEMORY_LOADER_DIR` | *(auto-detected)* | Explicit path to the folder containing your `MEMORY.md`. |
-| `MEMORY_LOADER_MAX_BYTES` | `200000` | Cap on total injected bytes. On overflow, remaining files are skipped with a note. |
-| `MEMORY_LOADER_MAX_DEPTH` | `4` | How many link-hops to follow from an index file. |
-
-Set these in your Claude Code `settings.json` under `"env"`, or in your shell environment. For example:
-
-```json
-{ "env": { "MEMORY_LOADER_MODE": "relevant" } }
-```
+Prefer config files? They're also env vars in `settings.json` → `env`: `MEMORY_LOADER_MODE`, `MEMORY_LOADER_MAX_BYTES`, `MEMORY_LOADER_DIR`, `MEMORY_LOADER_MAX_DEPTH` (default 4).
 
 ### Modes
 
-`MEMORY_LOADER_MODE` lets each user pick their own cost/reliability balance:
-
-| Mode | What it does | Trade-off |
+| Mode | Injects | Pro / con |
 |---|---|---|
-| `always` *(default)* | Inject **all** memory on **every** prompt. | Most reliable — survives Claude Code's context compaction, so memory is never "forgotten." Highest token cost; compounds over a long chat. |
-| `session` | Inject all memory **once per session** (at `SessionStart`), like `CLAUDE.md`. | Cheapest. But a long session's auto-compaction can summarize it away — the same forgetting you're fighting. |
-| `relevant` | Every prompt, but inject only the topic files whose keywords match the prompt (the lean `MEMORY.md` index is always kept). | Cheap on trivial prompts, full depth when relevant. It's a keyword heuristic, so it can miss a file whose wording doesn't match. |
+| `always` *(default)* | all memory, every prompt | Pro: never misses; survives context compaction. Con: most tokens; compounds over a long chat. |
+| `relevant` | only files matching the prompt | Pro: much cheaper; the lean index always goes in. Con: keyword match can miss a file whose wording differs. |
 
-Rule of thumb: `always` if you don't care about tokens and want it bulletproof; `relevant` if you want effectiveness without paying for everything on every "ok"; `session` if you want it cheapest and your sessions aren't marathon-length.
+### Helping `relevant` match (synonyms)
 
-### Helping `relevant` mode match (synonyms)
+`relevant` matches your prompt against each file's text, so it misses a file when your prompt uses a word the file doesn't contain ("automobile" vs "car"). Fix it locally — no external service:
 
-`relevant` matches your prompt against each file's text, so a file is missed when the prompt uses a word the file doesn't contain ("automobile" vs "car"). Both fixes stay local — no external service:
-
-- **Add a `keywords:` line** to a memory file's frontmatter with synonyms, abbreviations, and alternate terms. mementol matches the whole file (frontmatter included), so those terms make it surface:
+- Add a `keywords:` line to a file's frontmatter with synonyms and abbreviations:
   ```yaml
   ---
   name: Product pricing
-  keywords: [pricing, price, cost, margin, markup, supplier, vendor, SKU, cikkszám]
+  keywords: [pricing, price, cost, margin, markup, supplier, vendor, SKU]
   ---
   ```
-- **Let Claude write them.** Run **`/mementol-keywords`** and Claude reads your memory files and adds a synonym-rich `keywords:` line to each. To make it automatic for *new* memory, add one line to your `CLAUDE.md` / memory guidance:
-  > When writing a memory file, include a `keywords:` frontmatter array of synonyms, abbreviations, and alternate terms for the topic.
+- Or run **`/mementol-keywords`** and Claude fills them in for you. To do it automatically for new memory, add one line to your `CLAUDE.md`:
+  > When writing a memory file, include a `keywords:` frontmatter array of synonyms and alternate terms for the topic.
 
-(mementol also does light word-form matching — `pricing` finds `price` on its own — so it's mainly true synonyms you need to write down.)
+(It also does light word-form matching — `pricing` finds `price` — so mainly true synonyms need writing down.)
 
-## A note on token cost
+## Cost
 
-In the default `always` mode, mementol injects your linked memory on **every** prompt,
-including trivial ones — bulletproof, but it adds tokens each turn and compounds over a
-long conversation. If that matters to you, switch `MEMORY_LOADER_MODE` to `relevant` or
-`session` (see **Modes** above), keep topic files focused, and use `--list` to check your
-real footprint.
-
-## How to disable
-
-Run `/plugin`, select `mementol`, and disable it — or `/plugin uninstall`.
+`always` injects everything every prompt: bulletproof, but tokens add up over a long chat. If that matters, use `relevant` and/or lower `MEMORY_LOADER_MAX_BYTES`.
 
 ## Why "mementol"?
 
-Half *Memento* (the film about a man who can't form new memories, so he tattoos
-notes to himself), half over-the-counter brain pill. That's the whole job:
-external notes so Claude doesn't forget.
+*Memento* (the film where a man who can't form new memories leaves himself notes) + a brain-pill suffix. The whole job: external notes so Claude doesn't forget.
 
 ## License
 

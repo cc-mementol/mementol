@@ -2,7 +2,7 @@
 /*
  * inject-memory.mjs
  *
- * Mementol — Claude Code memory loader (UserPromptSubmit + SessionStart hook).
+ * Mementol — Claude Code memory loader (UserPromptSubmit hook).
  *
  * Claude Code loads your CLAUDE.md and the auto-memory INDEX (MEMORY.md), but it
  * does NOT reliably act on instructions inside them like "read MEMORY.md and the
@@ -22,14 +22,12 @@
  * Only files that exist are injected. CLAUDE.md is parsed for links but never
  * re-injected (Claude Code already loads it).
  *
- * The injection mode — the plugin's "Injection mode" setting (userConfig) or
- * the MEMORY_LOADER_MODE env var — controls the cost/reliability tradeoff:
- *   - always  (default) inject everything on every prompt. Survives context
- *                       compaction; highest token cost.
- *   - session           inject everything once per session (SessionStart).
- *                       Cheapest; can be lost to compaction in long sessions.
- *   - relevant          every prompt, inject only topic files whose keywords
- *                       match the prompt (the MEMORY.md index is always kept).
+ * MEMORY_LOADER_MODE (or the plugin's "Injection mode" setting) controls the
+ * cost/reliability tradeoff:
+ *   - always   (default) inject everything on every prompt. Survives context
+ *                        compaction; highest token cost.
+ *   - relevant           every prompt, inject only topic files whose keywords
+ *                        match the prompt (the MEMORY.md index is always kept).
  *
  * Fails silent (exit 0, no output) when there's nothing to do, so it is safe to
  * run globally across every project.
@@ -39,7 +37,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const VALID_MODES = new Set(['always', 'session', 'relevant']);
+const VALID_MODES = new Set(['always', 'relevant']);
 
 // A user setting can arrive three ways, in priority order: the --<flag>=<v> arg
 // (populated by the plugin's userConfig via ${user_config.<key>}), the
@@ -96,9 +94,6 @@ async function readStdin() {
 
 function isFile(p) { try { return fs.statSync(p).isFile(); } catch { return false; } }
 function isDir(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } }
-
-// Mirror Claude Code's project-dir slug: every non-alphanumeric char -> '-'.
-function slugFromCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
 
 // Pull referenced .md paths out of an index file: markdown links + @imports.
 function extractRefs(text) {
@@ -206,7 +201,7 @@ function keywordsOf(text) {
 
 // Choose which discovered files to inject, per MODE and the prompt text.
 function selectFiles(files, promptText) {
-  if (MODE !== 'relevant') return files;          // always / session: take all
+  if (MODE !== 'relevant') return files;          // always: take everything
   const kws = keywordsOf(promptText || '');
   return files.filter((f) => {
     if (f.isIndex) return true;                   // always keep the lean index
@@ -254,7 +249,7 @@ async function main() {
   const raw = await readStdin();
   if (raw) { try { input = JSON.parse(raw); } catch { /* {} */ } }
 
-  // --list: show everything discoverable, regardless of MODE/event.
+  // --list: show everything discoverable, regardless of MODE.
   if (LIST_MODE) {
     const files = discover(input);
     const cwd = input.cwd || process.cwd();
@@ -268,10 +263,8 @@ async function main() {
     return;
   }
 
-  // Each mode acts on exactly one hook event; the other is a no-op.
-  const event = input.hook_event_name || 'UserPromptSubmit';
-  if (MODE === 'session' && event !== 'SessionStart') return;
-  if (MODE !== 'session' && event !== 'UserPromptSubmit') return;
+  // Only act on prompt submission.
+  if ((input.hook_event_name || 'UserPromptSubmit') !== 'UserPromptSubmit') return;
 
   const files = discover(input);
   if (files.length === 0) return;
@@ -281,7 +274,7 @@ async function main() {
 
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: event,
+      hookEventName: 'UserPromptSubmit',
       additionalContext: built.ctx,
     },
   }));
