@@ -44,22 +44,31 @@ In projects with no memory it outputs nothing — safe to install globally.
 
 ## Install
 
-**Try it locally first** (from this repo's folder):
-
-```
-/plugin marketplace add /absolute/path/to/mementol
-/plugin install mementol@mementol
-```
-
-**Or from GitHub** once you've pushed it:
+In Claude Code, run these two commands:
 
 ```
 /plugin marketplace add cc-mementol/mementol
 /plugin install mementol@mementol
 ```
 
-After installing, open `/hooks` once (or restart Claude Code) so the hook registers.
-Run `/plugin` anytime to enable/disable it.
+Then open `/hooks` once (or restart Claude Code) to activate it — and that's it.
+It now runs on every prompt, automatically loading your linked memory on any
+project that has memory files. No `settings.json` editing required.
+
+To turn it off later, run `/plugin` and disable it (or `/plugin uninstall`).
+
+<details>
+<summary>Install from a local clone (for development)</summary>
+
+Clone or download the repo, then point the marketplace at the folder path
+instead of GitHub:
+
+```
+/plugin marketplace add /absolute/path/to/mementol
+/plugin install mementol@mementol
+```
+
+</details>
 
 ## Where it looks
 
