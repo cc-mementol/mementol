@@ -118,7 +118,7 @@ payload it uses the current working directory.)
 
 ## Configuration
 
-**Set the mode from the UI — no file editing.** When you enable the plugin, Claude Code prompts you for the **Injection mode**; type `always`, `session`, or `relevant` (or just press Enter for the `always` default). To change it later, run `/plugin`, open **mementol**, and edit its configuration.
+**Set it from the UI — no file editing.** When you enable the plugin, Claude Code prompts you for two options — **Injection mode** (`always`/`session`/`relevant`) and **Max injected bytes** — each with a sensible default you can just accept. Change them anytime via `/plugin` → **mementol** → its configuration.
 
 Everything below is optional — for people who prefer config files or want the other knobs:
 

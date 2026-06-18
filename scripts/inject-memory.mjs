@@ -39,30 +39,40 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const MAX_BYTES = Number(process.env.MEMORY_LOADER_MAX_BYTES || 200_000);
-const MAX_DEPTH = Number(process.env.MEMORY_LOADER_MAX_DEPTH || 4);
-
 const VALID_MODES = new Set(['always', 'session', 'relevant']);
 
-// Resolve the injection mode from (highest priority first): the --mode=<v> arg
-// (populated by the plugin's userConfig via ${user_config.memory_loader_mode}),
-// the CLAUDE_PLUGIN_OPTION_* env var Claude Code exports for that same setting,
-// or MEMORY_LOADER_MODE for manual/shell use. Invalid values are ignored, so an
-// unsubstituted placeholder safely falls through to the default.
-function pickMode() {
-  const argMode = (process.argv.slice(2).find((a) => a.startsWith('--mode=')) || '').slice(7);
+// A user setting can arrive three ways, in priority order: the --<flag>=<v> arg
+// (populated by the plugin's userConfig via ${user_config.<key>}), the
+// CLAUDE_PLUGIN_OPTION_<KEY> env var Claude Code exports for that setting, or a
+// plain <ENV> env var for manual/shell use. Returns the first non-empty value
+// (or '' if none); invalid values then fall through to defaults, so an
+// unsubstituted ${...} placeholder is harmless.
+function rawSetting(flag, env) {
+  const arg = process.argv.slice(2).find((a) => a.startsWith(`--${flag}=`));
   for (const c of [
-    argMode,
-    process.env.CLAUDE_PLUGIN_OPTION_MEMORY_LOADER_MODE,
-    process.env.CLAUDE_PLUGIN_OPTION_memory_loader_mode,
-    process.env.MEMORY_LOADER_MODE,
+    arg ? arg.slice(flag.length + 3) : '',
+    process.env[`CLAUDE_PLUGIN_OPTION_${env}`],
+    process.env[`CLAUDE_PLUGIN_OPTION_${env.toLowerCase()}`],
+    process.env[env],
   ]) {
-    const v = (c || '').toLowerCase();
-    if (VALID_MODES.has(v)) return v;
+    if (c != null && String(c).trim() !== '') return String(c).trim();
   }
-  return 'always';
+  return '';
 }
+
+function pickMode() {
+  const v = rawSetting('mode', 'MEMORY_LOADER_MODE').toLowerCase();
+  return VALID_MODES.has(v) ? v : 'always';
+}
+
+function pickMaxBytes() {
+  const n = Number(rawSetting('max-bytes', 'MEMORY_LOADER_MAX_BYTES'));
+  return Number.isFinite(n) && n >= 1000 ? Math.floor(n) : 200_000;
+}
+
 const MODE = pickMode();
+const MAX_BYTES = pickMaxBytes();
+const MAX_DEPTH = Number(process.env.MEMORY_LOADER_MAX_DEPTH || 4);
 
 // `--list` / `--dry-run`: print what would be discovered (human-readable) and
 // exit, instead of emitting hook JSON. Shows the full set regardless of MODE.

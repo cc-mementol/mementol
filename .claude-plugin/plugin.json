@@ -1,7 +1,7 @@
 {
   "name": "mementol",
   "description": "Mementol — memory medication for Claude Code; a daily dose so Claude doesn't forget. Scans your CLAUDE.md / MEMORY.md index files, follows their markdown and @import links to topic files (recursively), and injects those files' contents into every prompt — so your deep-dive memory is always in context, not just the lean index. (Cavinton for the context window.) Works on any project, no config.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "cc-mementol" },
   "homepage": "https://github.com/cc-mementol/mementol",
   "repository": "https://github.com/cc-mementol/mementol",
@@ -13,6 +13,13 @@
       "title": "Injection mode",
       "description": "When/what memory to inject: 'always' (everything, every prompt - most reliable, survives compaction), 'session' (once per session - cheapest), or 'relevant' (only topic files matching the prompt). Defaults to 'always'.",
       "default": "always"
+    },
+    "memory_loader_max_bytes": {
+      "type": "number",
+      "title": "Max injected bytes",
+      "description": "Upper bound on total memory injected per load (~4 chars/token, so 200000 is roughly 50k tokens). Files beyond the cap are skipped with a note. Raise it for large memory sets, especially in 'session' or 'relevant' mode.",
+      "default": 200000,
+      "min": 1000
     }
   }
 }
