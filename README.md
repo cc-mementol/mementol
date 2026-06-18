@@ -120,17 +120,36 @@ payload it uses the current working directory.)
 
 | Env var | Default | Purpose |
 |---|---|---|
+| `MEMORY_LOADER_MODE` | `always` | When/what to inject — `always`, `session`, or `relevant`. See **Modes** below. |
 | `MEMORY_LOADER_DIR` | *(auto-detected)* | Explicit path to the folder containing your `MEMORY.md`. |
 | `MEMORY_LOADER_MAX_BYTES` | `200000` | Cap on total injected bytes. On overflow, remaining files are skipped with a note. |
 | `MEMORY_LOADER_MAX_DEPTH` | `4` | How many link-hops to follow from an index file. |
 
-Set these in your Claude Code `settings.json` under `"env"`, or in your shell environment.
+Set these in your Claude Code `settings.json` under `"env"`, or in your shell environment. For example:
+
+```json
+{ "env": { "MEMORY_LOADER_MODE": "relevant" } }
+```
+
+### Modes
+
+`MEMORY_LOADER_MODE` lets each user pick their own cost/reliability balance:
+
+| Mode | What it does | Trade-off |
+|---|---|---|
+| `always` *(default)* | Inject **all** memory on **every** prompt. | Most reliable — survives Claude Code's context compaction, so memory is never "forgotten." Highest token cost; compounds over a long chat. |
+| `session` | Inject all memory **once per session** (at `SessionStart`), like `CLAUDE.md`. | Cheapest. But a long session's auto-compaction can summarize it away — the same forgetting you're fighting. |
+| `relevant` | Every prompt, but inject only the topic files whose keywords match the prompt (the lean `MEMORY.md` index is always kept). | Cheap on trivial prompts, full depth when relevant. It's a keyword heuristic, so it can miss a file whose wording doesn't match. |
+
+Rule of thumb: `always` if you don't care about tokens and want it bulletproof; `relevant` if you want effectiveness without paying for everything on every "ok"; `session` if you want it cheapest and your sessions aren't marathon-length.
 
 ## A note on token cost
 
-This injects your linked memory on **every** prompt, including trivial ones. That's the
-point — but it adds tokens per turn. Keep topic files focused, and lean on
-`MEMORY_LOADER_MAX_BYTES` as a guardrail. Use `--list` to see your real footprint.
+In the default `always` mode, mementol injects your linked memory on **every** prompt,
+including trivial ones — bulletproof, but it adds tokens each turn and compounds over a
+long conversation. If that matters to you, switch `MEMORY_LOADER_MODE` to `relevant` or
+`session` (see **Modes** above), keep topic files focused, and use `--list` to check your
+real footprint.
 
 ## How to disable
 

@@ -2,28 +2,36 @@
 /*
  * inject-memory.mjs
  *
- * Mementol — Claude Code `UserPromptSubmit` hook; a universal memory loader.
+ * Mementol — Claude Code memory loader (UserPromptSubmit + SessionStart hook).
  *
- * Claude Code loads your CLAUDE.md and the auto-memory INDEX (MEMORY.md), but
- * it does NOT reliably act on instructions inside them like "read MEMORY.md and
- * the relevant topic files" — it decides per turn whether to go read them, and
- * often skips it. This hook closes that gap: on every prompt it discovers your
- * memory index files, follows their links to topic `.md` files (recursively,
- * bounded), and injects those files' contents straight into the prompt context.
+ * Claude Code loads your CLAUDE.md and the auto-memory INDEX (MEMORY.md), but it
+ * does NOT reliably act on instructions inside them like "read MEMORY.md and the
+ * relevant topic files" — it decides per turn whether to go read them, and often
+ * skips it. Mementol closes that gap: it discovers your memory index files,
+ * follows their links to topic `.md` files (recursively, bounded), and injects
+ * those files' contents straight into context.
  *
- * It scans several known locations so it works on any project without config:
+ * Locations scanned (no config needed):
  *   - $MEMORY_LOADER_DIR ............... explicit override (a memory dir)
  *   - <auto-memory>/ ................... ~/.claude/projects/<slug>/memory/ (via transcript_path)
  *   - <project>/memory, <project>/.claude/memory
  *   - CLAUDE.md ....................... project, project/.claude, and ~/.claude (user)
  *   - MEMORY.md ....................... project, project/.claude
  *
- * Index/link styles followed: markdown links `[t](file.md)` and `@import` refs
- * (`@./file.md`). Only files that actually exist are injected. CLAUDE.md files
- * are parsed for links but never re-injected (Claude Code already loads them).
+ * Link styles followed: markdown `[t](file.md)` and `@import` (`@./file.md`).
+ * Only files that exist are injected. CLAUDE.md is parsed for links but never
+ * re-injected (Claude Code already loads it).
  *
- * It fails silent (exit 0, no output) when there is nothing to load, so it is
- * safe to run globally across every project.
+ * MEMORY_LOADER_MODE controls the cost/reliability tradeoff:
+ *   - always  (default) inject everything on every prompt. Survives context
+ *                       compaction; highest token cost.
+ *   - session           inject everything once per session (SessionStart).
+ *                       Cheapest; can be lost to compaction in long sessions.
+ *   - relevant          every prompt, inject only topic files whose keywords
+ *                       match the prompt (the MEMORY.md index is always kept).
+ *
+ * Fails silent (exit 0, no output) when there's nothing to do, so it is safe to
+ * run globally across every project.
  */
 
 import fs from 'node:fs';
@@ -33,9 +41,12 @@ import os from 'node:os';
 const MAX_BYTES = Number(process.env.MEMORY_LOADER_MAX_BYTES || 200_000);
 const MAX_DEPTH = Number(process.env.MEMORY_LOADER_MAX_DEPTH || 4);
 
-// `--list` / `--dry-run`: print what would be injected (human-readable) and
-// exit, instead of emitting the hook JSON. Run it from a project root to see
-// what this hook will load there: `node inject-memory.mjs --list`
+const VALID_MODES = new Set(['always', 'session', 'relevant']);
+let MODE = (process.env.MEMORY_LOADER_MODE || 'always').toLowerCase();
+if (!VALID_MODES.has(MODE)) MODE = 'always';
+
+// `--list` / `--dry-run`: print what would be discovered (human-readable) and
+// exit, instead of emitting hook JSON. Shows the full set regardless of MODE.
 const LIST_MODE = process.argv.slice(2).some((a) => a === '--list' || a === '--dry-run');
 
 async function readStdin() {
@@ -73,14 +84,13 @@ function extractRefs(text) {
     .filter((r) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(r)); // drop external URLs
 }
 
-// Build the list of seed entry points to start discovery from.
 function collectSeeds(input) {
   const home = os.homedir();
   const cwd = input.cwd || process.cwd();
 
-  // Memory directories. `trusted` dirs are unambiguously CC memory, so if they
-  // have no MEMORY.md index we inject every .md inside them. Untrusted dirs
-  // (a bare <project>/memory) are only used when they contain a MEMORY.md.
+  // `trusted` dirs are unambiguously CC memory, so if they have no MEMORY.md
+  // index we inject every .md inside. A bare <project>/memory is only used when
+  // it contains a MEMORY.md (avoids slurping an unrelated "memory" folder).
   const memDirs = [];
   if (process.env.MEMORY_LOADER_DIR) memDirs.push({ dir: process.env.MEMORY_LOADER_DIR, trusted: true });
   if (input.transcript_path) memDirs.push({ dir: path.join(path.dirname(input.transcript_path), 'memory'), trusted: true });
@@ -98,18 +108,14 @@ function collectSeeds(input) {
   return { memDirs, indexFiles, cwd };
 }
 
-async function main() {
-  let input = {};
-  const raw = await readStdin();
-  if (raw) { try { input = JSON.parse(raw); } catch { /* {} */ } }
-
+// Discover candidate memory files via BFS over index links. Returns an ordered
+// array of { abs, label, body, isIndex }. CLAUDE.md is traversed for links but
+// excluded from the result (Claude Code already loads it).
+function discover(input) {
   const { memDirs, indexFiles, cwd } = collectSeeds(input);
-
-  const visited = new Set();        // abs paths already queued/processed
-  const queue = [];                 // BFS: { abs, depth }
-  const injected = new Map();       // abs -> { label, body }
-  let total = 0;
-  let truncated = false;
+  const visited = new Set();
+  const queue = [];
+  const out = [];
 
   const enqueue = (abs, depth) => {
     if (depth > MAX_DEPTH || visited.has(abs) || !isFile(abs)) return;
@@ -117,7 +123,6 @@ async function main() {
     queue.push({ abs, depth });
   };
 
-  // Seed from memory directories.
   for (const { dir, trusted } of memDirs) {
     if (!isDir(dir)) continue;
     const idx = path.join(dir, 'MEMORY.md');
@@ -131,7 +136,6 @@ async function main() {
       }
     }
   }
-  // Seed from index files.
   for (const f of indexFiles) enqueue(f, 0);
 
   const labelFor = (abs) => {
@@ -146,37 +150,57 @@ async function main() {
     let body;
     try { body = fs.readFileSync(abs, 'utf8'); } catch { continue; }
 
-    // CLAUDE.md is already loaded by Claude Code — parse it for links but don't
-    // re-inject its content. Everything else gets injected.
-    const isClaudeMd = path.basename(abs).toUpperCase() === 'CLAUDE.MD';
-    if (!isClaudeMd && !injected.has(abs)) {
-      if (total + body.length > MAX_BYTES) { truncated = true; break; }
-      total += body.length;
-      injected.set(abs, { label: labelFor(abs), body: body.trim() });
+    const base = path.basename(abs).toUpperCase();
+    if (base !== 'CLAUDE.MD') {
+      out.push({ abs, label: labelFor(abs), body: body.trim(), isIndex: base === 'MEMORY.MD' });
     }
-
     if (depth < MAX_DEPTH) {
       const dir = path.dirname(abs);
       for (const ref of extractRefs(body)) enqueue(path.resolve(dir, ref), depth + 1);
     }
   }
+  return out;
+}
 
-  if (injected.size === 0) {
-    if (LIST_MODE) process.stdout.write(`mementol: no memory files found for ${cwd}\n`);
-    return;
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'that', 'this', 'with', 'you', 'your', 'are', 'was', 'what',
+  'how', 'why', 'can', 'could', 'should', 'would', 'from', 'into', 'about', 'have',
+  'has', 'had', 'will', 'not', 'but', 'any', 'all', 'get', 'got', 'use', 'using',
+  'make', 'made', 'please', 'need', 'want', 'help', 'file', 'files', 'code', 'let',
+  'its', 'our', 'their', 'them', 'there', 'here', 'where', 'when', 'then', 'than',
+  'some', 'more', 'most', 'very', 'just', 'like', 'also', 'only', 'over', 'such',
+]);
+
+function keywordsOf(text) {
+  return new Set((text.toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter((w) => !STOPWORDS.has(w)));
+}
+
+// Choose which discovered files to inject, per MODE and the prompt text.
+function selectFiles(files, promptText) {
+  if (MODE !== 'relevant') return files;          // always / session: take all
+  const kws = keywordsOf(promptText || '');
+  return files.filter((f) => {
+    if (f.isIndex) return true;                   // always keep the lean index
+    if (kws.size === 0) return false;             // trivial prompt: index only
+    const hay = (f.label + '\n' + f.body).toLowerCase();
+    for (const k of kws) if (hay.includes(k)) return true;
+    return false;
+  });
+}
+
+// Assemble the injected context block, applying the byte cap.
+function buildContext(files) {
+  let total = 0;
+  let truncated = false;
+  const chosen = [];
+  for (const f of files) {
+    if (total + f.body.length > MAX_BYTES) { truncated = true; break; }
+    total += f.body.length;
+    chosen.push(f);
   }
+  if (chosen.length === 0) return null;
 
-  if (LIST_MODE) {
-    const lines = [...injected.values()].map((f) => `  ${f.label}  (${f.body.length} bytes)`);
-    process.stdout.write(
-      `mementol would inject ${injected.size} file(s), ${total} bytes total:\n` +
-      lines.join('\n') + '\n' +
-      (truncated ? `  ... (truncated at the ${MAX_BYTES}-byte cap)\n` : '')
-    );
-    return;
-  }
-
-  const sections = [...injected.values()].map((f) => `----- ${f.label} -----\n${f.body}`);
+  const sections = chosen.map((f) => `----- ${f.label} -----\n${f.body}`);
   let ctx =
     "The following are this project's memory files, gathered from its " +
     'CLAUDE.md / MEMORY.md index and the topic files it links to. Treat them ' +
@@ -186,11 +210,43 @@ async function main() {
     ctx += `\n\n(Some memory files were omitted: hit the ${MAX_BYTES}-byte ` +
       'injection cap. Raise it with the MEMORY_LOADER_MAX_BYTES env var.)';
   }
+  return { ctx, total, count: chosen.length };
+}
+
+async function main() {
+  let input = {};
+  const raw = await readStdin();
+  if (raw) { try { input = JSON.parse(raw); } catch { /* {} */ } }
+
+  // --list: show everything discoverable, regardless of MODE/event.
+  if (LIST_MODE) {
+    const files = discover(input);
+    const cwd = input.cwd || process.cwd();
+    if (files.length === 0) { process.stdout.write(`mementol: no memory files found for ${cwd}\n`); return; }
+    const total = files.reduce((n, f) => n + f.body.length, 0);
+    const lines = files.map((f) => `  ${f.label}  (${f.body.length} bytes)${f.isIndex ? '  [index]' : ''}`);
+    process.stdout.write(
+      `mementol (mode=${MODE}) discovered ${files.length} file(s), ${total} bytes total:\n` +
+      lines.join('\n') + '\n'
+    );
+    return;
+  }
+
+  // Each mode acts on exactly one hook event; the other is a no-op.
+  const event = input.hook_event_name || 'UserPromptSubmit';
+  if (MODE === 'session' && event !== 'SessionStart') return;
+  if (MODE !== 'session' && event !== 'UserPromptSubmit') return;
+
+  const files = discover(input);
+  if (files.length === 0) return;
+
+  const built = buildContext(selectFiles(files, input.prompt));
+  if (!built) return;
 
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext: ctx,
+      hookEventName: event,
+      additionalContext: built.ctx,
     },
   }));
 }
