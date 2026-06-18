@@ -1,0 +1,11 @@
+{
+  "name": "mementol",
+  "owner": { "name": "cc-mementol" },
+  "plugins": [
+    {
+      "name": "mementol",
+      "source": "./",
+      "description": "Memory medication for Claude Code — auto-injects your linked memory files into every prompt so Claude doesn't forget."
+    }
+  ]
+}
