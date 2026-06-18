@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-memory.mjs"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-memory.mjs", "--mode=${user_config.memory_loader_mode}"],
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-memory.mjs"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-memory.mjs", "--mode=${user_config.memory_loader_mode}"],
             "timeout": 10
           }
         ]

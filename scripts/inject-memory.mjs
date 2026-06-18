@@ -22,7 +22,8 @@
  * Only files that exist are injected. CLAUDE.md is parsed for links but never
  * re-injected (Claude Code already loads it).
  *
- * MEMORY_LOADER_MODE controls the cost/reliability tradeoff:
+ * The injection mode — the plugin's "Injection mode" setting (userConfig) or
+ * the MEMORY_LOADER_MODE env var — controls the cost/reliability tradeoff:
  *   - always  (default) inject everything on every prompt. Survives context
  *                       compaction; highest token cost.
  *   - session           inject everything once per session (SessionStart).
@@ -42,8 +43,26 @@ const MAX_BYTES = Number(process.env.MEMORY_LOADER_MAX_BYTES || 200_000);
 const MAX_DEPTH = Number(process.env.MEMORY_LOADER_MAX_DEPTH || 4);
 
 const VALID_MODES = new Set(['always', 'session', 'relevant']);
-let MODE = (process.env.MEMORY_LOADER_MODE || 'always').toLowerCase();
-if (!VALID_MODES.has(MODE)) MODE = 'always';
+
+// Resolve the injection mode from (highest priority first): the --mode=<v> arg
+// (populated by the plugin's userConfig via ${user_config.memory_loader_mode}),
+// the CLAUDE_PLUGIN_OPTION_* env var Claude Code exports for that same setting,
+// or MEMORY_LOADER_MODE for manual/shell use. Invalid values are ignored, so an
+// unsubstituted placeholder safely falls through to the default.
+function pickMode() {
+  const argMode = (process.argv.slice(2).find((a) => a.startsWith('--mode=')) || '').slice(7);
+  for (const c of [
+    argMode,
+    process.env.CLAUDE_PLUGIN_OPTION_MEMORY_LOADER_MODE,
+    process.env.CLAUDE_PLUGIN_OPTION_memory_loader_mode,
+    process.env.MEMORY_LOADER_MODE,
+  ]) {
+    const v = (c || '').toLowerCase();
+    if (VALID_MODES.has(v)) return v;
+  }
+  return 'always';
+}
+const MODE = pickMode();
 
 // `--list` / `--dry-run`: print what would be discovered (human-readable) and
 // exit, instead of emitting hook JSON. Shows the full set regardless of MODE.

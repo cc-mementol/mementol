@@ -1,10 +1,18 @@
 {
   "name": "mementol",
   "description": "Mementol — memory medication for Claude Code; a daily dose so Claude doesn't forget. Scans your CLAUDE.md / MEMORY.md index files, follows their markdown and @import links to topic files (recursively), and injects those files' contents into every prompt — so your deep-dive memory is always in context, not just the lean index. (Cavinton for the context window.) Works on any project, no config.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "cc-mementol" },
   "homepage": "https://github.com/cc-mementol/mementol",
   "repository": "https://github.com/cc-mementol/mementol",
   "license": "MIT",
-  "keywords": ["memory", "context", "hooks", "claude-code", "productivity"]
+  "keywords": ["memory", "context", "hooks", "claude-code", "productivity"],
+  "userConfig": {
+    "memory_loader_mode": {
+      "type": "string",
+      "title": "Injection mode",
+      "description": "When/what memory to inject: 'always' (everything, every prompt - most reliable, survives compaction), 'session' (once per session - cheapest), or 'relevant' (only topic files matching the prompt). Defaults to 'always'.",
+      "default": "always"
+    }
+  }
 }
