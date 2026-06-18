@@ -147,6 +147,22 @@ Set these in your Claude Code `settings.json` under `"env"`, or in your shell en
 
 Rule of thumb: `always` if you don't care about tokens and want it bulletproof; `relevant` if you want effectiveness without paying for everything on every "ok"; `session` if you want it cheapest and your sessions aren't marathon-length.
 
+### Helping `relevant` mode match (synonyms)
+
+`relevant` matches your prompt against each file's text, so a file is missed when the prompt uses a word the file doesn't contain ("automobile" vs "car"). Both fixes stay local — no external service:
+
+- **Add a `keywords:` line** to a memory file's frontmatter with synonyms, abbreviations, and alternate terms. mementol matches the whole file (frontmatter included), so those terms make it surface:
+  ```yaml
+  ---
+  name: Product pricing
+  keywords: [pricing, price, cost, margin, markup, supplier, vendor, SKU, cikkszám]
+  ---
+  ```
+- **Let Claude write them.** Run **`/mementol-keywords`** and Claude reads your memory files and adds a synonym-rich `keywords:` line to each. To make it automatic for *new* memory, add one line to your `CLAUDE.md` / memory guidance:
+  > When writing a memory file, include a `keywords:` frontmatter array of synonyms, abbreviations, and alternate terms for the topic.
+
+(mementol also does light word-form matching — `pricing` finds `price` on its own — so it's mainly true synonyms you need to write down.)
+
 ## A note on token cost
 
 In the default `always` mode, mementol injects your linked memory on **every** prompt,

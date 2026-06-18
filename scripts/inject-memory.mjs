@@ -212,7 +212,14 @@ function selectFiles(files, promptText) {
     if (f.isIndex) return true;                   // always keep the lean index
     if (kws.size === 0) return false;             // trivial prompt: index only
     const hay = (f.label + '\n' + f.body).toLowerCase();
-    for (const k of kws) if (hay.includes(k)) return true;
+    for (const k of kws) {
+      if (hay.includes(k)) return true;
+      // Light inflection tolerance: retry on the word's stem so a prompt form
+      // matches a related form in the file (pricing->price, suppliers->supplier).
+      // True synonyms still need to live in the file's `keywords:` frontmatter.
+      const stem = k.replace(/(ingly|edly|ing|ed|ies|es|s)$/, '');
+      if (stem.length >= 4 && stem !== k && hay.includes(stem)) return true;
+    }
     return false;
   });
 }
